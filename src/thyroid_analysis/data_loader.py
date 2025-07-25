@@ -1,13 +1,9 @@
-# src/thyroid_analysis/data_loader.py
 
+import os
 import pandas as pd
-from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-RAW_DATA_DIR = BASE_DIR / "data" / "raw"
-
-def load_raw_data(filename: str) -> pd.DataFrame:
-    filepath = RAW_DATA_DIR / filename
-    if not filepath.exists():
-        raise FileNotFoundError(f"Raw data file not found: {filepath}")
-    return pd.read_csv(filepath)
+def load_dataset(filename: str) -> pd.DataFrame:
+    data_path = os.path.join("data", "raw", filename)
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Dataset not found: {data_path}")
+    return pd.read_csv(data_path)
