@@ -1,0 +1,9 @@
+first TSH
+first T4
+first T3
+last T3
+last FT4
+first FT3
+last FT3
+Age
+last T4
