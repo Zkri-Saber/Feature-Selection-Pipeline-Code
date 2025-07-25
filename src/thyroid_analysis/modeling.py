@@ -25,16 +25,12 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 def get_models():
     return {
-        "Logistic Regression": LogisticRegression(max_iter=100, solver='lbfgs'),
-        "Random Forest": RandomForestClassifier(max_depth=20, min_samples_split=2, n_estimators=500),
-        "SVM": SVC(C=10, gamma=1, kernel='rbf', probability=True),
+        
         "XGBoost": XGBClassifier(learning_rate=0.2, max_depth=6, n_estimators=600, use_label_encoder=False, eval_metric="logloss"),
-        "Naive Bayes": GaussianNB(),
         "Gradient Boosting": GradientBoostingClassifier(learning_rate=0.1, max_depth=7, n_estimators=600),
-        "LightGBM": LGBMClassifier(learning_rate=0.1, n_estimators=350, max_depth=8),
-        "CatBoost": CatBoostClassifier(depth=8, iterations=500, learning_rate=0.1, verbose=0),
-        "Extra Trees": ExtraTreesClassifier(n_estimators=300, max_depth=15),
-        "AdaBoost": AdaBoostClassifier(learning_rate=0.2, n_estimators=200)
+        "LightGBM": LGBMClassifier(learning_rate=0.1, n_estimators=350, max_depth=8)
+        
+        
     }
 
 def boruta_feature_selection(X, y):
@@ -53,23 +49,44 @@ def train_and_evaluate_models(X, y, models):
     for name, model in models.items():
         print(f"🚀 Training {name}...")
         try:
-            X_res, y_res = smote.fit_resample(X, y)
-            y_pred = cross_val_predict(model, X_res, y_res, cv=skf)
-            results[name] = {
-                "Accuracy": accuracy_score(y_res, y_pred),
-                "Precision": precision_score(y_res, y_pred, average="macro"),
-                "Recall": recall_score(y_res, y_pred, average="macro"),
-                "F1 Score": f1_score(y_res, y_pred, average="macro"),
-                "ROC AUC": roc_auc_score(pd.get_dummies(y_res), pd.get_dummies(y_pred), average="macro", multi_class="ovr"),
+            scores = {
+                "Accuracy": [],
+                "Precision": [],
+                "Recall": [],
+                "F1 Score": [],
+                "ROC AUC": []
             }
+
+            for train_idx, test_idx in skf.split(X, y):
+                X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+                y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+                X_res, y_res = smote.fit_resample(X_train, y_train)
+                model.fit(X_res, y_res)
+                y_pred = model.predict(X_test)
+
+                scores["Accuracy"].append(accuracy_score(y_test, y_pred))
+                scores["Precision"].append(precision_score(y_test, y_pred, average="macro"))
+                scores["Recall"].append(recall_score(y_test, y_pred, average="macro"))
+                scores["F1 Score"].append(f1_score(y_test, y_pred, average="macro"))
+                scores["ROC AUC"].append(
+                    roc_auc_score(pd.get_dummies(y_test), pd.get_dummies(y_pred), average="macro", multi_class="ovr")
+                )
+
+            results[name] = {metric: np.mean(vals) for metric, vals in scores.items()}
         except Exception as e:
             print(f"⚠️ Skipping {name} due to error: {e}")
 
     os.makedirs("results", exist_ok=True)
     results_df = pd.DataFrame(results).T
-    results_df.to_csv("results/model_comparison_results.csv")
+    try:
+        results_df.to_csv("results/model_comparison_results.csv")
+    except PermissionError:
+        print("❌ Please close 'results/model_comparison_results.csv' and try again.")
+
     print("📄 Saved model comparison results to results/model_comparison_results.csv")
     return results_df
+
 
 def plot_model_comparison(results_df):
     os.makedirs("results/figures", exist_ok=True)
