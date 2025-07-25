@@ -1,91 +1,78 @@
+# modeling.py
 import os
-import joblib
+import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.model_selection import cross_val_predict, RepeatedStratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score, roc_curve, auc
-from sklearn.preprocessing import StandardScaler
-from imblearn.over_sampling import SMOTE
-
+from sklearn.preprocessing import StandardScaler, label_binarize
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier, AdaBoostClassifier
+from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier,
+                              ExtraTreesClassifier, AdaBoostClassifier, StackingClassifier)
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
-import warnings
+from imblearn.over_sampling import BorderlineSMOTE
+from boruta import BorutaPy
+from sklearn.ensemble import RandomForestClassifier as RFC
 from sklearn.exceptions import ConvergenceWarning
-warnings.filterwarnings("ignore", category=ConvergenceWarning)
+import warnings
 
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 def get_models():
     return {
-        "Logistic Regression": LogisticRegression(max_iter=2000, solver='lbfgs'),
-        "Random Forest": RandomForestClassifier(),
-        "SVM": SVC(probability=True),
-        "XGBoost": XGBClassifier(use_label_encoder=False, eval_metric="mlogloss"),
+        "Logistic Regression": LogisticRegression(max_iter=100, solver='lbfgs'),
+        "Random Forest": RandomForestClassifier(max_depth=20, min_samples_split=2, n_estimators=500),
+        "SVM": SVC(C=10, gamma=1, kernel='rbf', probability=True),
+        "XGBoost": XGBClassifier(learning_rate=0.2, max_depth=6, n_estimators=600, use_label_encoder=False, eval_metric="logloss"),
         "Naive Bayes": GaussianNB(),
-        "Gradient Boosting": GradientBoostingClassifier(),
-        "LightGBM": LGBMClassifier(),
-        "CatBoost": CatBoostClassifier(verbose=0),
-        "Extra Trees": ExtraTreesClassifier(),
-        "AdaBoost": AdaBoostClassifier()
+        "Gradient Boosting": GradientBoostingClassifier(learning_rate=0.1, max_depth=7, n_estimators=600),
+        "LightGBM": LGBMClassifier(learning_rate=0.1, n_estimators=350, max_depth=8),
+        "CatBoost": CatBoostClassifier(depth=8, iterations=500, learning_rate=0.1, verbose=0),
+        "Extra Trees": ExtraTreesClassifier(n_estimators=300, max_depth=15),
+        "AdaBoost": AdaBoostClassifier(learning_rate=0.2, n_estimators=200)
     }
 
-def train_and_evaluate_models(X, y, models):
-    """
-    Train and evaluate multiple models with cross-validation.
-    Returns a DataFrame of evaluation results.
-    """
-    from sklearn.model_selection import cross_val_predict
-    from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
-    from sklearn.model_selection import StratifiedKFold
+def boruta_feature_selection(X, y):
+    forest = RFC(n_estimators=1000, n_jobs=-1, max_depth=5)
+    boruta = BorutaPy(estimator=forest, n_estimators='auto', verbose=0, random_state=42)
+    boruta.fit(X.values, y.values)
+    selected = X.columns[boruta.support_].tolist()
+    print(f"✅ Boruta selected features: {selected}")
+    return X[selected]
 
-    skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+def train_and_evaluate_models(X, y, models):
     results = {}
+    skf = RepeatedStratifiedKFold(n_splits=10, n_repeats=10, random_state=42)
+    smote = BorderlineSMOTE(random_state=42)
 
     for name, model in models.items():
-        print(f"🔍 Training {name}...")
+        print(f"🚀 Training {name}...")
         try:
-            y_pred = cross_val_predict(model, X, y, cv=skf)
-            y_proba = cross_val_predict(model, X, y, cv=skf, method='predict_proba')
-
-            acc = accuracy_score(y, y_pred)
-            prec = precision_score(y, y_pred, average='weighted')
-            rec = recall_score(y, y_pred, average='weighted')
-            f1 = f1_score(y, y_pred, average='weighted')
-            auc = roc_auc_score(pd.get_dummies(y), y_proba, average='macro', multi_class='ovr')
-
+            X_res, y_res = smote.fit_resample(X, y)
+            y_pred = cross_val_predict(model, X_res, y_res, cv=skf)
             results[name] = {
-                "Accuracy": acc,
-                "Precision": prec,
-                "Recall": rec,
-                "F1 Score": f1,
-                "ROC AUC": auc,
+                "Accuracy": accuracy_score(y_res, y_pred),
+                "Precision": precision_score(y_res, y_pred, average="macro"),
+                "Recall": recall_score(y_res, y_pred, average="macro"),
+                "F1 Score": f1_score(y_res, y_pred, average="macro"),
+                "ROC AUC": roc_auc_score(pd.get_dummies(y_res), pd.get_dummies(y_pred), average="macro", multi_class="ovr"),
             }
-        except ValueError as e:
+        except Exception as e:
             print(f"⚠️ Skipping {name} due to error: {e}")
-            continue
 
-    results_df = pd.DataFrame(results).T  # Convert dict to DataFrame
-    results_df.to_csv("results/model_comparison_results.csv", index=True)
-    print("📄 Saved comparison results to results/model_comparison_results.csv")
+    os.makedirs("results", exist_ok=True)
+    results_df = pd.DataFrame(results).T
+    results_df.to_csv("results/model_comparison_results.csv")
+    print("📄 Saved model comparison results to results/model_comparison_results.csv")
     return results_df
 
-
-def plot_model_comparison(results):
-   
-   
-
-    # Save CSV
-    os.makedirs("results/metrics", exist_ok=True)
-    csv_path = "results/metrics/model_comparison.csv"
-    results_df.to_csv(csv_path)
-    print(f"📁 Model comparison results saved to {csv_path}")
-
-    # Plot
+def plot_model_comparison(results_df):
+    os.makedirs("results/figures", exist_ok=True)
     results_df.plot(kind="bar", figsize=(12, 6))
     plt.title("Model Comparison - Evaluation Metrics")
     plt.ylabel("Score")
@@ -95,70 +82,28 @@ def plot_model_comparison(results):
     plt.close()
     print("📊 Comparison plot saved to results/figures/model_comparison.png")
 
-def save_bar_plot_with_labels(x, y, title, filename):
-    plt.figure(figsize=(10, 6))
-    plt.bar(x, y, color='skyblue')
-    plt.title(title)
-    plt.xlabel('Features')
-    plt.ylabel('Importance Score')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    os.makedirs("results/figures", exist_ok=True)
-    plt.savefig(f"results/figures/{filename}")
-    plt.close()
-    print(f"📊 Bar plot saved to results/figures/{filename}")
-def plot_feature_importance(model, X, y, top_n=10):
-    """
-    Plot feature importance for tree-based models.
-    """
-    if hasattr(model, "feature_importances_"):
-        importances = model.feature_importances_
-    elif hasattr(model, "coef_"):
-        importances = np.abs(model.coef_[0])
-    else:
-        print(f"⚠️ Model {model.__class__.__name__} does not provide feature importances.")
-        return
-
-    # Create a DataFrame for visualization
-    feature_importance_df = pd.DataFrame({
-        "Feature": X.columns,
-        "Importance": importances
-    })
-    feature_importance_df = feature_importance_df.sort_values(by="Importance", ascending=False).head(top_n)
-
-    # Plot
-    save_bar_plot_with_labels(
-        x=feature_importance_df["Feature"],
-        y=feature_importance_df["Importance"],
-        title=f"Feature Importance - {model.__class__.__name__}",
-        filename=f"feature_importance_{model.__class__.__name__.lower()}.png"
-    )
-
 def plot_roc_curves(X, y, models):
-    from sklearn.preprocessing import label_binarize
-
     os.makedirs("results/figures", exist_ok=True)
     y_bin = label_binarize(y, classes=np.unique(y))
     n_classes = y_bin.shape[1]
-
     plt.figure(figsize=(10, 8))
-    for name, model in models.items():
-        scaler = StandardScaler()
-        smote = SMOTE(random_state=42)
-        X_scaled = scaler.fit_transform(X)
-        X_resampled, y_resampled = smote.fit_resample(X_scaled, y)
-        y_bin_resampled = label_binarize(y_resampled, classes=np.unique(y))
 
-        model.fit(X_resampled, y_resampled)
-        if hasattr(model, "predict_proba"):
-            y_score = model.predict_proba(X_scaled)
-            fpr = dict()
-            tpr = dict()
-            roc_auc = dict()
-            for i in range(n_classes):
-                fpr[i], tpr[i], _ = roc_curve(y_bin[:, i], y_score[:, i])
-                roc_auc[i] = auc(fpr[i], tpr[i])
-            plt.plot(fpr[0], tpr[0], label=f"{name} (AUC = {roc_auc[0]:.2f})")
+    for name, model in models.items():
+        try:
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            smote = BorderlineSMOTE(random_state=42)
+            X_res, y_res = smote.fit_resample(X_scaled, y)
+
+            model.fit(X_res, y_res)
+            if hasattr(model, "predict_proba"):
+                y_score = model.predict_proba(X_scaled)
+                fpr, tpr, _ = roc_curve(y_bin[:, 0], y_score[:, 0])
+                roc_auc = auc(fpr, tpr)
+                plt.plot(fpr, tpr, label=f"{name} (AUC = {roc_auc:.2f})")
+        except Exception as e:
+            print(f"⚠️ Skipping {name} for ROC due to error: {e}")
+
     plt.plot([0, 1], [0, 1], "k--")
     plt.xlabel("False Positive Rate")
     plt.ylabel("True Positive Rate")
@@ -167,3 +112,10 @@ def plot_roc_curves(X, y, models):
     plt.tight_layout()
     plt.savefig("results/figures/roc_curves.png")
     plt.close()
+    print("📈 ROC Curves saved to results/figures/roc_curves.png")
+
+def get_stacked_model(models):
+    top_estimators = [(name.replace(" ", "_"), model) for name, model in models.items()
+                      if name in ["Gradient Boosting", "XGBoost", "LightGBM"]]
+    meta_model = LogisticRegression()
+    return StackingClassifier(estimators=top_estimators, final_estimator=meta_model, cv=5)

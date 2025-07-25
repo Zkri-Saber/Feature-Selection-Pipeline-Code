@@ -1,0 +1,28 @@
+{
+    "Random Forest": {
+        "max_depth": 20,
+        "n_estimators": 100
+    },
+    "XGBoost": {
+        "learning_rate": 0.1,
+        "max_depth": 6,
+        "n_estimators": 200
+    },
+    "Gradient Boosting": {
+        "learning_rate": 0.1,
+        "n_estimators": 200
+    },
+    "LightGBM": {
+        "learning_rate": 0.1,
+        "n_estimators": 200
+    },
+    "CatBoost": {
+        "depth": 6,
+        "learning_rate": 0.1,
+        "verbose": 0
+    },
+    "Extra Trees": {
+        "max_depth": null,
+        "n_estimators": 100
+    }
+}
